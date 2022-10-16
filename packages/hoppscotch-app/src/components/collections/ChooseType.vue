@@ -10,6 +10,7 @@
         :label="`${t('collection.my_collections')}`"
       />
       <SmartTab
+        v-if="currentUser"
         :id="'team-collections'"
         :label="`${t('collection.team_collections')}`"
         :disabled="!currentUser"
