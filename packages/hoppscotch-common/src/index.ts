@@ -1,4 +1,4 @@
-import { createApp, Ref } from "vue"
+import { createApp } from "vue"
 import { setupLocalPersistence } from "./newstore/localpersistence"
 import { performMigrations } from "./helpers/migrations"
 import { initializeFirebase } from "./helpers/fb"
@@ -12,25 +12,10 @@ import "nprogress/nprogress.css"
 
 import App from "./App.vue"
 
-export type PlatformDef = {
-  ui?: {
-    appHeader?: {
-      paddingTop?: Ref<string>
-      paddingLeft?: Ref<string>
-    }
-  }
-}
+import { PlatformConfig, setPlatformConfig } from "./platform"
 
-/**
- * Defines the fields, functions and properties that will be
- * filled in by the individual platforms.
- *
- * This value is populated upon calling `createHoppApp`
- */
-export let platform: PlatformDef
-
-export function createHoppApp(el: string | Element, platformDef: PlatformDef) {
-  platform = platformDef
+export function createHoppApp(el: string | Element, config: PlatformConfig) {
+  setPlatformConfig(config)
 
   const app = createApp(App)
 

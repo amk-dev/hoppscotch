@@ -6,8 +6,8 @@
       <div
         class="inline-flex items-center space-x-2"
         :style="{
-          paddingTop: platform.ui?.appHeader?.paddingTop?.value,
-          paddingLeft: platform.ui?.appHeader?.paddingLeft?.value,
+          // paddingTop: platform.ui?.appHeader?.paddingTop?.value,
+          // paddingLeft: platform.ui?.appHeader?.paddingLeft?.value,
         }"
       >
         <ButtonSecondary
@@ -175,7 +175,6 @@ import { probableUser$ } from "@helpers/fb/auth"
 import { useI18n } from "@composables/i18n"
 import { useReadonlyStream } from "@composables/stream"
 import { invokeAction } from "@helpers/actions"
-import { platform } from "~/index"
 
 const t = useI18n()
 
