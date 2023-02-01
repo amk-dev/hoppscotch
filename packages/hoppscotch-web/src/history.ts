@@ -12,8 +12,11 @@ import {
   updateDoc,
 } from "firebase/firestore"
 import { FormDataKeyValue } from "@hoppscotch/data"
-import { platform } from "~/platform"
-import { getSettingSubject, settingsStore } from "~/newstore/settings"
+import { def as platformAuth } from "./firebase/auth"
+import {
+  getSettingSubject,
+  settingsStore,
+} from "@hoppscotch/common/newstore/settings"
 import {
   GQLHistoryEntry,
   graphqlHistoryStore,
@@ -24,7 +27,8 @@ import {
   setRESTHistoryEntries,
   translateToNewGQLHistory,
   translateToNewRESTHistory,
-} from "~/newstore/history"
+} from "@hoppscotch/common/newstore/history"
+import { HistoryPlatformDef } from "@hoppscotch/common/platform/history"
 
 type HistoryFBCollections = "history" | "graphqlHistory"
 
@@ -76,7 +80,7 @@ async function writeHistory(
       ? purgeFormDataFromRequest(entry as RESTHistoryEntry)
       : entry
 
-  const currentUser = platform.auth.getCurrentUser()
+  const currentUser = platformAuth.getCurrentUser()
 
   if (currentUser === null)
     throw new Error("User not logged in to sync history")
@@ -98,7 +102,7 @@ async function deleteHistory(
   entry: (RESTHistoryEntry | GQLHistoryEntry) & { id: string },
   col: HistoryFBCollections
 ) {
-  const currentUser = platform.auth.getCurrentUser()
+  const currentUser = platformAuth.getCurrentUser()
 
   if (currentUser === null)
     throw new Error("User not logged in to delete history")
@@ -114,7 +118,7 @@ async function deleteHistory(
 }
 
 async function clearHistory(col: HistoryFBCollections) {
-  const currentUser = platform.auth.getCurrentUser()
+  const currentUser = platformAuth.getCurrentUser()
 
   if (currentUser === null)
     throw new Error("User not logged in to clear history")
@@ -130,7 +134,7 @@ async function toggleStar(
   entry: (RESTHistoryEntry | GQLHistoryEntry) & { id: string },
   col: HistoryFBCollections
 ) {
-  const currentUser = platform.auth.getCurrentUser()
+  const currentUser = platformAuth.getCurrentUser()
 
   if (currentUser === null) throw new Error("User not logged in to toggle star")
 
@@ -146,8 +150,8 @@ async function toggleStar(
 }
 
 export function initHistory() {
-  const currentUser$ = platform.auth.getCurrentUserStream()
-  const currentUser = platform.auth.getCurrentUser()
+  const currentUser$ = platformAuth.getCurrentUserStream()
+  const currentUser = platformAuth.getCurrentUser()
 
   const restHistorySub = restHistoryStore.dispatches$.subscribe((dispatch) => {
     if (loadedRESTHistory && currentUser && settingsStore.value.syncHistory) {
@@ -262,4 +266,8 @@ export function initHistory() {
       initHistory()
     }
   })
+}
+
+export const def: HistoryPlatformDef = {
+  initHistory,
 }
