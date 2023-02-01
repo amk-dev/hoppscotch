@@ -43,7 +43,7 @@ import { useI18n } from "@composables/i18n"
 import { useStream } from "@composables/stream"
 import { useToast } from "@composables/toast"
 import { onLoggedIn } from "@composables/auth"
-import { loadRequestFromSync, startRequestSync } from "~/helpers/fb/request"
+import { platform } from "~/platform"
 import { oauthRedirect } from "~/helpers/oauth"
 import { useRoute } from "vue-router"
 
@@ -102,7 +102,7 @@ function setupRequestSync(
       Object.keys(route.query).length === 0 &&
       !(route.query.code || route.query.error)
     ) {
-      const request = await loadRequestFromSync()
+      const request = await platform.request.loadRequestFromSync()
       if (request) {
         if (!isEqualHoppRESTRequest(request, getRESTRequest())) {
           requestForSync.value = request
@@ -111,7 +111,7 @@ function setupRequestSync(
       }
     }
 
-    sub = startRequestSync()
+    sub = platform.request.startRequestSync()
   })
 
   // Stop subscription to stop syncing

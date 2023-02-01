@@ -10,10 +10,10 @@ import {
 import { doc, getDoc, getFirestore, setDoc } from "firebase/firestore"
 import { cloneDeep } from "lodash-es"
 import { HoppRESTRequest, translateToNewRequest } from "@hoppscotch/data"
-import { platform } from "~/platform"
-import { HoppUser } from "~/platform/auth"
-import { restRequest$ } from "~/newstore/RESTSession"
-
+import { def as platformAuth } from "./firebase/auth"
+import type { HoppUser } from "@hoppscotch/common/platform/auth"
+import { restRequest$ } from "@hoppscotch/common/newstore/RESTSession"
+import { RequestPlatformDef } from "@hoppscotch/common/platform/request"
 /**
  * Writes a request to a user's firestore sync
  *
@@ -45,7 +45,7 @@ function writeCurrentRequest(user: HoppUser, request: HoppRESTRequest) {
  * @returns Fetched request object if exists else null
  */
 export async function loadRequestFromSync(): Promise<HoppRESTRequest | null> {
-  const currentUser = platform.auth.getCurrentUser()
+  const currentUser = platformAuth.getCurrentUser()
 
   if (!currentUser)
     throw new Error("Cannot load request from sync without login")
@@ -67,7 +67,7 @@ export async function loadRequestFromSync(): Promise<HoppRESTRequest | null> {
  * Unsubscribe to stop syncing.
  */
 export function startRequestSync(): Subscription {
-  const currentUser$ = platform.auth.getCurrentUserStream()
+  const currentUser$ = platformAuth.getCurrentUserStream()
 
   const sub = combineLatest([
     currentUser$,
@@ -84,4 +84,9 @@ export function startRequestSync(): Subscription {
     })
 
   return sub
+}
+
+export const def: RequestPlatformDef = {
+  startRequestSync,
+  loadRequestFromSync,
 }

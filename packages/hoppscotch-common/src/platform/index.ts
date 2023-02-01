@@ -3,6 +3,7 @@ import { UIPlatformDef } from "./ui"
 import { EnvironmentsPlatformDef } from "./environments"
 import { HistoryPlatformDef } from "./history"
 import { SettingsPlatfromDef } from "./settings"
+import { RequestPlatformDef } from "./request"
 
 export type PlatformDef = {
   ui?: UIPlatformDef
@@ -10,6 +11,7 @@ export type PlatformDef = {
   environments: EnvironmentsPlatformDef
   history: HistoryPlatformDef
   settings: SettingsPlatfromDef
+  request: RequestPlatformDef
 }
 
 export let platform: PlatformDef
