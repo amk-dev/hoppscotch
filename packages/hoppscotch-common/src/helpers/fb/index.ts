@@ -2,7 +2,6 @@ import { initializeApp } from "firebase/app"
 import { platform } from "~/platform"
 import { initAnalytics } from "./analytics"
 import { initCollections } from "./collections"
-import { initSettings } from "./settings"
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_API_KEY,
@@ -23,7 +22,7 @@ export function initializeFirebase() {
       initializeApp(firebaseConfig)
 
       platform.auth.performAuthInit()
-      initSettings()
+      platform.settings.initSettings()
       initCollections()
       platform.history.initHistory()
       platform.environments.initEnvironments()

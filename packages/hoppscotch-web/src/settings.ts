@@ -5,8 +5,13 @@ import {
   onSnapshot,
   setDoc,
 } from "firebase/firestore"
-import { platform } from "~/platform"
-import { applySetting, settingsStore, SettingsType } from "~/newstore/settings"
+import { def as platformAuth } from "./firebase/auth"
+import {
+  applySetting,
+  settingsStore,
+  SettingsType,
+} from "@hoppscotch/common/newstore/settings"
+import { SettingsPlatfromDef } from "@hoppscotch/common/platform/settings"
 
 /**
  * Used locally to prevent infinite loop when settings sync update
@@ -20,7 +25,7 @@ let loadedSettings = false
  * Write Transform
  */
 async function writeSettings(setting: string, value: any) {
-  const currentUser = platform.auth.getCurrentUser()
+  const currentUser = platformAuth.getCurrentUser()
 
   if (currentUser === null)
     throw new Error("Cannot write setting, user not signed in")
@@ -46,8 +51,8 @@ async function writeSettings(setting: string, value: any) {
 }
 
 export function initSettings() {
-  const currentUser$ = platform.auth.getCurrentUserStream()
-  const currentUser = platform.auth.getCurrentUser()
+  const currentUser$ = platformAuth.getCurrentUserStream()
+  const currentUser = platformAuth.getCurrentUser()
 
   settingsStore.dispatches$.subscribe((dispatch) => {
     if (currentUser && loadedSettings) {
@@ -95,4 +100,8 @@ export function initSettings() {
       )
     }
   })
+}
+
+export const def: SettingsPlatfromDef = {
+  initSettings,
 }
