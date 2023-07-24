@@ -195,5 +195,4 @@ declare module '@vue/runtime-core' {
     WorkspaceCurrent: typeof import('./components/workspace/Current.vue')['default']
     WorkspaceSelector: typeof import('./components/workspace/Selector.vue')['default']
   }
-
 }
