@@ -18,12 +18,30 @@ import {
   updateTeamRequest,
   deleteTeamRequest,
 } from "~/helpers/backend/mutations/TeamRequest"
-import { Ref, computed } from "vue"
+import { createTeam } from "~/helpers/backend/mutations/Team"
+import { Ref, computed, ref } from "vue"
 import {
   RESTCollectionChildrenView,
   RESTCollectionLevelAuthHeadersView,
+  RESTCollectionViewItem,
   RootRESTCollectionView,
 } from "../view"
+import { runGQLQuery, runGQLSubscription } from "~/helpers/backend/GQLClient"
+import {
+  GetCollectionChildrenDocument,
+  GetMyTeamsDocument,
+  RootCollectionsOfTeamDocument,
+  TeamCollectionAddedDocument,
+  TeamCollectionMovedDocument,
+  TeamCollectionRemovedDocument,
+  TeamCollectionUpdatedDocument,
+  TeamRequestAddedDocument,
+  TeamRequestDeletedDocument,
+  TeamRequestMovedDocument,
+  TeamRequestOrderUpdatedDocument,
+  TeamRequestUpdatedDocument,
+} from "~/helpers/backend/graphql"
+import { Subscription } from "wonka"
 
 export class TeamsWorkspaceProviderService
   extends Service
@@ -35,11 +53,129 @@ export class TeamsWorkspaceProviderService
 
   private workspaceService = this.bind(NewWorkspaceService)
 
+  private workspaces: Ref<Workspace[]> = ref([])
+
+  private collections: Ref<
+    (WorkspaceCollection & {
+      parentCollectionID?: string
+    })[]
+  > = ref([])
+
+  private requests: Ref<WorkspaceRequest[]> = ref([])
+
+  private subscriptions: Subscription[] = []
+
+  private fetchingWorkspaces = ref(false)
+  private loadingCollections = ref<string[]>([])
+
   constructor() {
     super()
 
-    // setup subscriptions to the teams workspace provider
+    this.fetchingWorkspaces = ref(true)
+
+    fetchAllWorkspaces().then((res) => {
+      // ignoring error for now, write logic for that later
+      if (E.isLeft(res)) {
+        console.error("Failed to fetch workspaces")
+
+        this.fetchingWorkspaces.value = false
+
+        return
+      }
+
+      console.log(res.right.myTeams)
+
+      this.workspaces.value = res.right.myTeams.map((team) => {
+        return {
+          name: team.name,
+          workspaceID: team.id,
+          providerID: this.providerID,
+        }
+      })
+
+      this.fetchingWorkspaces.value = false
+    })
+
     this.workspaceService.registerWorkspaceProvider(this)
+  }
+
+  // this is temporary, i need this to create workspaces
+  async createWorkspace(
+    workspaceName: string
+  ): Promise<E.Either<unknown, HandleRef<Workspace>>> {
+    const res = await createTeam(workspaceName)()
+
+    if (E.isLeft(res)) {
+      return res
+    }
+
+    const workspaceID = res.right.id
+
+    const workspace = {
+      name: workspaceName,
+      workspaceID,
+      providerID: this.providerID,
+    }
+
+    this.workspaces.value.push(workspace)
+
+    return E.right(
+      computed(() => {
+        return {
+          data: workspace,
+          type: "ok" as const,
+        }
+      })
+    )
+  }
+
+  // this is temporary, i need this to populate root collections
+  async selectWorkspace(
+    workspaceHandle: HandleRef<Workspace>
+  ): Promise<E.Either<unknown, void>> {
+    if (!isValidWorkspaceHandle(workspaceHandle, this.providerID)) {
+      return E.left("INVALID_WORKSPACE_HANDLE" as const)
+    }
+
+    // set this as activeWorkspaceHandle in workspaceService
+    this.workspaceService.activeWorkspaceHandle.value = workspaceHandle
+
+    // unsubscribe previous subscriptions
+    this.subscriptions.forEach((sub) => sub.unsubscribe())
+
+    // setup new subscriptions
+    this.setupTeamsAddedSubscription(workspaceHandle.value.data.workspaceID)
+    this.setupTeamsUpdatedSubscription(workspaceHandle.value.data.workspaceID)
+    this.setupTeamsRemovedSubscription(workspaceHandle.value.data.workspaceID)
+    this.setupTeamsRequestAddedSubscription(
+      workspaceHandle.value.data.workspaceID
+    )
+    this.setupTeamsRequestUpdatedSubscription(
+      workspaceHandle.value.data.workspaceID
+    )
+    this.setupTeamsRequestRemovedSubscription(
+      workspaceHandle.value.data.workspaceID
+    )
+
+    // start fetching root collections
+    const res = await fetchRootCollections(
+      workspaceHandle.value.data.workspaceID
+    )
+
+    if (E.isLeft(res)) {
+      return res
+    }
+
+    res.right.rootCollectionsOfTeam.forEach((collection) => {
+      this.collections.value.push({
+        collectionID: collection.id,
+        providerID: this.providerID,
+        workspaceID: workspaceHandle.value.data.workspaceID,
+        name: collection.title,
+      })
+    })
+
+    return E.right(undefined)
   }
 
   async createRESTRootCollection(
@@ -271,17 +407,149 @@ export class TeamsWorkspaceProviderService
     return Promise.resolve(E.right(undefined))
   }
 
-  getCollectionHandle(
+  getWorkspaces(): HandleRef<HandleRef<Workspace>[]> {
+    return computed(() => {
+      if (this.fetchingWorkspaces.value) {
+        return {
+          type: "invalid" as const,
+          reason: "LOADING_WORKSPACES",
+        }
+      }
+
+      return {
+        data: this.workspaces.value.map((workspace) => {
+          return computed(() => {
+            const existsStill = this.workspaces.value.includes(workspace)
+
+            if (!existsStill) {
+              return {
+                type: "invalid" as const,
+                reason: "WORKSPACE_DOES_NOT_EXIST",
+              }
+            }
+
+            return {
+              data: workspace,
+              type: "ok" as const,
+            }
+          })
+        }),
+        type: "ok" as const,
+      }
+    })
+
+    // return this.workspaces.value.map((workspace) => {
+    //   return computed(() => {
+    //     const existsStill = this.workspaces.value.includes(workspace)
+
+    //     if (!existsStill) {
+    //       return {
+    //         type: "invalid" as const,
+    //         reason: "WORKSPACE_DOES_NOT_EXIST",
+    //       }
+    //     }
+
+    //     return {
+    //       data: workspace,
+    //       type: "ok" as const,
+    //     }
+    //   })
+    // })
+  }
+
+  async getCollectionHandle(
     workspaceHandle: HandleRef<Workspace>,
     collectionID: string
   ): Promise<E.Either<unknown, HandleRef<WorkspaceCollection>>> {
-    throw new Error("Method not implemented.")
+    if (!isValidWorkspaceHandle(workspaceHandle, this.providerID)) {
+      return E.left("INVALID_WORKSPACE_HANDLE" as const)
+    }
+
+    const collection = computed(() => {
+      return this.collections.value.find(
+        (collection) => collection.collectionID === collectionID
+      )
+    })
+
+    if (!collection.value) {
+      return E.left("COLLECTION_DOES_NOT_EXIST" as const)
+    }
+
+    return E.right(
+      computed(() => {
+        if (!isValidWorkspaceHandle(workspaceHandle, this.providerID)) {
+          return {
+            type: "invalid" as const,
+            reason: "INVALID_WORKSPACE_HANDLE",
+          }
+        }
+
+        if (!collection.value) {
+          return {
+            type: "invalid" as const,
+            reason: "COLLECTION_DOES_NOT_EXIST",
+          }
+        }
+
+        return {
+          data: {
+            collectionID: collection.value.collectionID,
+            providerID: collection.value.providerID,
+            workspaceID: collection.value.workspaceID,
+            name: collection.value.name,
+          },
+          type: "ok" as const,
+        }
+      })
+    )
   }
 
-  getRESTCollectionChildrenView(
+  async getRESTCollectionChildrenView(
     collectionHandle: HandleRef<WorkspaceCollection>
   ): Promise<E.Either<unknown, HandleRef<RESTCollectionChildrenView>>> {
-    throw new Error("Method not implemented.")
+    if (!isValidCollectionHandle(collectionHandle, this.providerID)) {
+      return E.left("INVALID_COLLECTION_HANDLE" as const)
+    }
+
+    // PR-COMMENT: this feels a little weird, we're returning a computed, i could move this into the returned computed
+    // look into this later
+    const collectionChildren = computed((): RESTCollectionViewItem[] =>
+      this.collections.value
+        .filter(
+          (collection) =>
+            collection.parentCollectionID ===
+            collectionHandle.value.data.collectionID
+        )
+        .map((collection) => ({
+          type: "collection",
+          value: {
+            collectionID: collection.collectionID,
+            name: collection.name,
+          },
+        }))
+    )
+
+    return E.right(
+      computed(() => {
+        if (!isValidCollectionHandle(collectionHandle, this.providerID)) {
+          return {
+            type: "invalid" as const,
+            reason: "INVALID_COLLECTION_HANDLE",
+          }
+        }
+
+        return {
+          data: {
+            collectionID: collectionHandle.value.data.collectionID,
+            providerID: collectionHandle.value.data.providerID,
+            workspaceID: collectionHandle.value.data.workspaceID,
+            content: collectionChildren,
+            loading: ref(false), // TODO: make this dynamic
+          },
+          type: "ok" as const,
+        }
+      })
+    )
   }
 
   getRESTCollectionLevelAuthHeadersView(
@@ -290,23 +558,283 @@ export class TeamsWorkspaceProviderService
     throw new Error("Method not implemented.")
   }
 
-  getRESTRootCollectionView(
+  async getRESTRootCollectionView(
     workspaceHandle: HandleRef<Workspace>
   ): Promise<E.Either<unknown, HandleRef<RootRESTCollectionView>>> {
-    throw new Error("Method not implemented.")
+    if (!isValidWorkspaceHandle(workspaceHandle, this.providerID)) {
+      return Promise.resolve(E.left("INVALID_WORKSPACE_HANDLE" as const))
+    }
+
+    const rootCollections = computed(() =>
+      this.collections.value
+        .filter((collection) => !collection.parentCollectionID)
+        .map((collection) => ({
+          collectionID: collection.collectionID,
+          name: collection.name,
+        }))
+    )
+
+    return E.right(
+      computed(() => {
+        return {
+          data: {
+            workspaceID: workspaceHandle.value.data.workspaceID,
+            providerID: this.providerID,
+            collections: rootCollections,
+            loading: ref(false), // TODO: make this dynamic
+          },
+          type: "ok" as const,
+        }
+      })
+    )
   }
 
-  getRequestHandle(
+  async getRequestHandle(
     workspaceHandle: HandleRef<Workspace>,
     requestID: string
   ): Promise<E.Either<unknown, HandleRef<WorkspaceRequest>>> {
-    throw new Error("Method not implemented.")
+    if (!isValidWorkspaceHandle(workspaceHandle, this.providerID)) {
+      return E.left("INVALID_WORKSPACE_HANDLE" as const)
+    }
+
+    const request = computed(() => {
+      return this.requests.value.find(
+        (request) => request.requestID === requestID
+      )
+    })
+
+    if (!request.value) {
+      return E.left("REQUEST_DOES_NOT_EXIST" as const)
+    }
+
+    return E.right(
+      computed(() => {
+        if (!isValidWorkspaceHandle(workspaceHandle, this.providerID)) {
+          return {
+            type: "invalid" as const,
+            reason: "INVALID_WORKSPACE_HANDLE",
+          }
+        }
+
+        if (!request.value) {
+          return {
+            type: "invalid" as const,
+            reason: "REQUEST_DOES_NOT_EXIST",
+          }
+        }
+
+        return {
+          data: {
+            requestID: request.value.requestID,
+            providerID: request.value.providerID,
+            workspaceID: request.value.workspaceID,
+            collectionID: request.value.collectionID,
+            request: request.value.request,
+          },
+          type: "ok" as const,
+        }
+      })
+    )
   }
 
-  getWorkspaceHandle(
+  // this might be temporary, might move this to decor
+  async getWorkspaceHandle(
     workspaceID: string
   ): Promise<E.Either<unknown, HandleRef<Workspace>>> {
-    throw new Error("Method not implemented.")
+    const workspace = computed(() => {
+      return this.workspaces.value.find(
+        (workspace) => workspace.workspaceID === workspaceID
+      )
+    })
+
+    if (!workspace.value) {
+      return E.left("WORKSPACE_DOES_NOT_EXIST" as const)
+    }
+
+    return Promise.resolve(
+      E.right(
+        computed(() => {
+          if (!workspace.value) {
+            return {
+              type: "invalid" as const,
+              reason: "WORKSPACE_DOES_NOT_EXIST",
+            }
+          }
+
+          return {
+            data: workspace.value,
+            type: "ok" as const,
+          }
+        })
+      )
+    )
+  }
+
+  private async setupTeamsAddedSubscription(workspaceID: string) {
+    const [teamCollAdded$, teamCollAddedSub] =
+      runTeamCollectionAddedSubscription(workspaceID)
+
+    this.subscriptions.push(teamCollAddedSub)
+
+    teamCollAdded$.subscribe((result) => {
+      if (E.isLeft(result)) {
+        console.error(result.left)
+        return
+      }
+
+      console.group("Team Collection Added")
+      console.log(result)
+      console.groupEnd()
+
+      const collection: WorkspaceCollection & {
+        parentCollectionID?: string
+      } = {
+        name: result.right.teamCollectionAdded.title,
+        collectionID: result.right.teamCollectionAdded.id,
+        providerID: this.providerID,
+        workspaceID: workspaceID,
+        parentCollectionID: result.right.teamCollectionAdded.parent?.id,
+      }
+
+      this.collections.value.push(collection)
+    })
+  }
+
+  private async setupTeamsUpdatedSubscription(workspaceID: string) {
+    const [teamCollUpdated$, teamCollUpdatedSub] =
+      runTeamCollectionUpdatedSubscription(workspaceID)
+
+    this.subscriptions.push(teamCollUpdatedSub)
+
+    teamCollUpdated$.subscribe((result) => {
+      if (E.isLeft(result)) {
+        console.error(result.left)
+        return
+      }
+
+      console.group("Team Collection Updated")
+      console.log(result)
+      console.groupEnd()
+
+      this.collections.value = this.collections.value.map((collection) => {
+        if (collection.collectionID === result.right.teamCollectionUpdated.id) {
+          return {
+            ...collection,
+            name: result.right.teamCollectionUpdated.title,
+            // TODO: add result.right.teamCollectinUpdated.data
+          }
+        }
+
+        return collection
+      })
+    })
+  }
+
+  private async setupTeamsRemovedSubscription(workspaceID: string) {
+    const [teamCollRemoved$, teamCollRemovedSub] =
+      runTeamCollectionRemovedSubscription(workspaceID)
+
+    this.subscriptions.push(teamCollRemovedSub)
+
+    teamCollRemoved$.subscribe((result) => {
+      if (E.isLeft(result)) {
+        console.error(result.left)
+        return
+      }
+
+      console.group("Team Collection Removed")
+      console.log(result)
+      console.groupEnd()
+
+      this.collections.value = this.collections.value.filter(
+        (collection) =>
+          collection.collectionID !== result.right.teamCollectionRemoved
+      )
+    })
+  }
+
+  private async setupTeamsRequestAddedSubscription(workspaceID: string) {
+    const [teamRequestAdded$, teamRequestAddedSub] =
+      runTeamRequestAddedSubscription(workspaceID)
+
+    this.subscriptions.push(teamRequestAddedSub)
+
+    teamRequestAdded$.subscribe((result) => {
+      if (E.isLeft(result)) {
+        console.error(result.left)
+        return
+      }
+
+      console.group("Team Request Added")
+      console.log(result)
+      console.groupEnd()
+
+      const request: WorkspaceRequest = {
+        requestID: result.right.teamRequestAdded.id,
+        providerID: this.providerID,
+        workspaceID: workspaceID,
+        collectionID: result.right.teamRequestAdded.collectionID,
+        request: JSON.parse(result.right.teamRequestAdded.request),
+      }
+
+      this.requests.value.push(request)
+    })
+  }
+
+  private async setupTeamsRequestUpdatedSubscription(workspaceID: string) {
+    const [teamRequestUpdated$, teamRequestUpdatedSub] =
+      runTeamRequestUpdatedSubscription(workspaceID)
+
+    this.subscriptions.push(teamRequestUpdatedSub)
+
+    teamRequestUpdated$.subscribe((result) => {
+      if (E.isLeft(result)) {
+        console.error(result.left)
+        return
+      }
+
+      console.group("Team Request Updated")
+      console.log(result)
+      console.groupEnd()
+
+      const updatedRequest: WorkspaceRequest = {
+        collectionID: result.right.teamRequestUpdated.collectionID,
+        providerID: this.providerID,
+        requestID: result.right.teamRequestUpdated.id,
+        workspaceID: workspaceID,
+        request: JSON.parse(result.right.teamRequestUpdated.request),
+      }
+
+      this.requests.value = this.requests.value.map((request) => {
+        if (request.requestID === result.right.teamRequestUpdated.id) {
+          return updatedRequest
+        }
+
+        return request
+      })
+    })
+  }
+
+  private async setupTeamsRequestRemovedSubscription(workspaceID: string) {
+    const [teamRequestRemoved$, teamRequestRemovedSub] =
+      runTeamRequestRemovedSubscription(workspaceID)
+
+    this.subscriptions.push(teamRequestRemovedSub)
+
+    teamRequestRemoved$.subscribe((result) => {
+      if (E.isLeft(result)) {
+        console.error(result.left)
+        return
+      }
+
+      console.group("Team Request Removed")
+      console.log(result)
+      console.groupEnd()
+
+      this.requests.value = this.requests.value.filter(
+        (request) => request.requestID !== result.right.teamRequestDeleted
+      )
+    })
   }
 }
 
@@ -347,3 +875,117 @@ const isValidRequestHandle = (
     request.value.type === "ok" && request.value.data.providerID === providerID
   )
 }
+
+const fetchAllWorkspaces = async (cursor?: string) => {
+  const result = await runGQLQuery({
+    query: GetMyTeamsDocument,
+    variables: {
+      cursor,
+    },
+  })
+
+  return result
+}
+
+const fetchRootCollections = async (teamID: string, cursor?: string) => {
+  const result = await runGQLQuery({
+    query: RootCollectionsOfTeamDocument,
+    variables: {
+      teamID,
+      cursor,
+    },
+  })
+
+  return result
+}
+
+const getCollectionChildren = async (collectionID: string, cursor?: string) => {
+  const res = await runGQLQuery({
+    query: GetCollectionChildrenDocument,
+    variables: {
+      collectionID: collectionID,
+      cursor,
+    },
+  })
+
+  return res
+}
+
+const runTeamCollectionAddedSubscription = (teamID: string) =>
+  runGQLSubscription({
+    query: TeamCollectionAddedDocument,
+    variables: {
+      teamID: teamID,
+    },
+  })
+
+const runTeamCollectionUpdatedSubscription = (teamID: string) =>
+  runGQLSubscription({
+    query: TeamCollectionUpdatedDocument,
+    variables: {
+      teamID,
+    },
+  })
+
+const runTeamCollectionRemovedSubscription = (teamID: string) =>
+  runGQLSubscription({
+    query: TeamCollectionRemovedDocument,
+    variables: {
+      teamID,
+    },
+  })
+
+const runTeamCollectionMovedSubscription = (teamID: string) =>
+  runGQLSubscription({
+    query: TeamCollectionMovedDocument,
+    variables: {
+      teamID,
+    },
+  })
+
+const runTeamRequestAddedSubscription = (teamID: string) =>
+  runGQLSubscription({
+    query: TeamRequestAddedDocument,
+    variables: {
+      teamID,
+    },
+  })
+
+const runTeamRequestUpdatedSubscription = (teamID: string) =>
+  runGQLSubscription({
+    query: TeamRequestUpdatedDocument,
+    variables: {
+      teamID,
+    },
+  })
+
+const runTeamRequestRemovedSubscription = (teamID: string) =>
+  runGQLSubscription({
+    query: TeamRequestDeletedDocument,
+    variables: {
+      teamID,
+    },
+  })
+
+const runTeamRequestMovedSubscription = (teamID: string) =>
+  runGQLSubscription({
+    query: TeamRequestMovedDocument,
+    variables: {
+      teamID,
+    },
+  })
+
+const runTeamRequestOrderUpdatedSubscription = (teamID: string) =>
+  runGQLSubscription({
+    query: TeamRequestOrderUpdatedDocument,
+    variables: {
+      teamID,
+    },
+  })
+
+window.TeamsWorkspaceProviderService = TeamsWorkspaceProviderService
+
+// createWorkspace + selectWorkspace situation
+// cache the children of a collection
+// cursors
+// setup subscriptions for the changes

@@ -2126,7 +2126,7 @@ const setCollectionProperties = (newCollection: {
       headers: collection.headers,
     }
     pipe(
-      updateTeamCollection(collection.id, JSON.stringify(data), undefined),
+      updateTeamCollection(collection.id, data, undefined),
       TE.match(
         (err: GQLError<string>) => {
           toast.error(`${getErrorMessage(err)}`)

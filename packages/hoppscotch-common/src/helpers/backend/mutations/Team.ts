@@ -52,7 +52,7 @@ type RemoveTeamMemberErrors =
   | "team/invalid_id"
   | "team/not_required_role"
 
-export const createTeam = (name: TeamName) =>
+export const createTeam = (name: string) =>
   pipe(
     runMutation<
       CreateTeamMutation,

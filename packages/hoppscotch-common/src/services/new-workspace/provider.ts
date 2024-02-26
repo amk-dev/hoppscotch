@@ -22,6 +22,10 @@ export interface WorkspaceProvider {
 
   workspaceDecor?: Ref<WorkspaceDecor>
 
+  createWorkspace(
+    workspaceTitle: string
+  ): Promise<E.Either<unknown, HandleRef<Workspace>>>
+
   getWorkspaceHandle(
     workspaceID: string
   ): Promise<E.Either<unknown, HandleRef<Workspace>>>
@@ -29,6 +33,10 @@ export interface WorkspaceProvider {
     workspaceHandle: HandleRef<Workspace>,
     collectionID: string
   ): Promise<E.Either<unknown, HandleRef<WorkspaceCollection>>>
+  // PR-COMMENT: add collectionID as params
+  // because in teams, we cannot extract the collectionID from the requestID as we do in the current implementation
+  // another consideration is we don't even need the collectionID or workspaceID if we're adding them to the request object
+  // eg: a request belongs to a collection, and a collection belongs to a workspace. So, we can just pass the request id and get the collection and workspace from the request object
   getRequestHandle(
     workspaceHandle: HandleRef<Workspace>,
     requestID: string

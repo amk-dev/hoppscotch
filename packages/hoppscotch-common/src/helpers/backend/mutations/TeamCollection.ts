@@ -1,3 +1,4 @@
+import { HoppCollection } from "@hoppscotch/data"
 import { runMutation } from "../GQLClient"
 import {
   CreateChildCollectionDocument,
@@ -128,10 +129,12 @@ export const importJSONToTeam = (collectionJSON: string, teamID: string) =>
 
 export const updateTeamCollection = (
   collectionID: string,
-  data?: string,
+  updatedCollection?: Partial<Omit<HoppCollection, "name">>,
   newTitle?: string
-) =>
-  runMutation<
+) => {
+  const data = JSON.stringify(updatedCollection)
+
+  return runMutation<
     UpdateTeamCollectionMutation,
     UpdateTeamCollectionMutationVariables,
     ""
@@ -140,3 +143,4 @@ export const updateTeamCollection = (
     data,
     newTitle,
   })
+}

@@ -111,6 +111,7 @@ export class PersonalWorkspaceProviderService
     return parseInt(pathArr[pathArr.length - 1])
   }
 
+  // PR-COMMENT: use async keyword so we can avoid explicitly using Promise.resolve
   public createRESTRootCollection(
     workspaceHandle: HandleRef<Workspace>,
     newCollection: Partial<Exclude<HoppCollection, "id">> & { name: string }
@@ -573,6 +574,7 @@ export class PersonalWorkspaceProviderService
       collectionID.split("/").map((x) => parseInt(x))
     )
 
+    // PR-COMMENT: why do we have !collection, if we're trying to get a collection by its path and its not there, doesnt that mean the path is invalid ?
     if (!collection) {
       return Promise.resolve(E.left("COLLECTION_NOT_FOUND"))
     }

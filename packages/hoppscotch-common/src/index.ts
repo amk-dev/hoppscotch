@@ -17,6 +17,8 @@ import "../assets/themes/themes.scss"
 
 import App from "./App.vue"
 
+import "./services/new-workspace/providers/teams.workspace"
+
 export function createHoppApp(el: string | Element, platformDef: PlatformDef) {
   setPlatformDef(platformDef)
 
