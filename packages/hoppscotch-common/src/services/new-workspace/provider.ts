@@ -59,6 +59,7 @@ export interface WorkspaceProvider {
     workspaceHandle: HandleRef<Workspace>
   ): Promise<E.Either<never, HandleRef<RESTCollectionJSONView>>>
 
+  // PR-COMMENT: we need to exclude ID from the Partial HoppCollection
   createRESTRootCollection(
     workspaceHandle: HandleRef<Workspace>,
     newCollection: Partial<Exclude<HoppCollection, "id">> & { name: string }

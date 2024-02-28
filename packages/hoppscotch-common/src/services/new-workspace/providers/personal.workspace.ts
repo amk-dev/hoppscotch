@@ -124,6 +124,8 @@ export class PersonalWorkspaceProviderService
     const newCollectionID =
       this.restCollectionState.value.state.length.toString()
 
+    // PR-COMMENT: if we're not considering the Partial values passed from the newCollection what is the point of that
+    // either we only accept the name, or we accept all the values
     const newRootCollection = makeCollection({
       folders: [],
       requests: [],

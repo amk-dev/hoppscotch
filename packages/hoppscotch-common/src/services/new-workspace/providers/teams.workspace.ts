@@ -58,10 +58,15 @@ export class TeamsWorkspaceProviderService
   private collections: Ref<
     (WorkspaceCollection & {
       parentCollectionID?: string
+      order: string
     })[]
   > = ref([])
 
-  private requests: Ref<WorkspaceRequest[]> = ref([])
+  private requests: Ref<
+    (WorkspaceRequest & {
+      order: string
+    })[]
+  > = ref([])
 
   private subscriptions: Subscription[] = []
 
@@ -144,9 +149,15 @@ export class TeamsWorkspaceProviderService
     this.subscriptions.forEach((sub) => sub.unsubscribe())
 
     // setup new subscriptions
-    this.setupTeamsAddedSubscription(workspaceHandle.value.data.workspaceID)
-    this.setupTeamsUpdatedSubscription(workspaceHandle.value.data.workspaceID)
-    this.setupTeamsRemovedSubscription(workspaceHandle.value.data.workspaceID)
+    this.setupTeamsCollectionAddedSubscription(
+      workspaceHandle.value.data.workspaceID
+    )
+    this.setupTeamsCollectionUpdatedSubscription(
+      workspaceHandle.value.data.workspaceID
+    )
+    this.setupTeamsCollectionRemovedSubscription(
+      workspaceHandle.value.data.workspaceID
+    )
     this.setupTeamsRequestAddedSubscription(
       workspaceHandle.value.data.workspaceID
     )
@@ -154,6 +165,12 @@ export class TeamsWorkspaceProviderService
       workspaceHandle.value.data.workspaceID
     )
     this.setupTeamsRequestRemovedSubscription(
+      workspaceHandle.value.data.workspaceID
+    )
+    this.setupTeamsRequestMovedSubscription(
+      workspaceHandle.value.data.workspaceID
+    )
+    this.setupTeamsCollectionMovedSubscription(
       workspaceHandle.value.data.workspaceID
     )
 
@@ -670,7 +687,7 @@ export class TeamsWorkspaceProviderService
     )
   }
 
-  private async setupTeamsAddedSubscription(workspaceID: string) {
+  private async setupTeamsCollectionAddedSubscription(workspaceID: string) {
     const [teamCollAdded$, teamCollAddedSub] =
       runTeamCollectionAddedSubscription(workspaceID)
 
@@ -700,7 +717,7 @@ export class TeamsWorkspaceProviderService
     })
   }
 
-  private async setupTeamsUpdatedSubscription(workspaceID: string) {
+  private async setupTeamsCollectionUpdatedSubscription(workspaceID: string) {
     const [teamCollUpdated$, teamCollUpdatedSub] =
       runTeamCollectionUpdatedSubscription(workspaceID)
 
@@ -730,7 +747,7 @@ export class TeamsWorkspaceProviderService
     })
   }
 
-  private async setupTeamsRemovedSubscription(workspaceID: string) {
+  private async setupTeamsCollectionRemovedSubscription(workspaceID: string) {
     const [teamCollRemoved$, teamCollRemovedSub] =
       runTeamCollectionRemovedSubscription(workspaceID)
 
@@ -750,6 +767,31 @@ export class TeamsWorkspaceProviderService
         (collection) =>
           collection.collectionID !== result.right.teamCollectionRemoved
       )
+    })
+  }
+
+  private async setupTeamsCollectionMovedSubscription(workspaceID: string) {
+    const [teamCollMoved$, teamCollMovedSub] =
+      runTeamCollectionMovedSubscription(workspaceID)
+
+    this.subscriptions.push(teamCollMovedSub)
+
+    teamCollMoved$.subscribe((result) => {
+      if (E.isLeft(result)) {
+        console.error(result.left)
+        return
+      }
+
+      this.collections.value = this.collections.value.map((collection) => {
+        if (collection.collectionID === result.right.teamCollectionMoved.id) {
+          return {
+            ...collection,
+            parentCollectionID: result.right.teamCollectionMoved.parent?.id,
+          }
+        }
+
+        return collection
+      })
     })
   }
 
@@ -834,6 +876,31 @@ export class TeamsWorkspaceProviderService
       this.requests.value = this.requests.value.filter(
         (request) => request.requestID !== result.right.teamRequestDeleted
       )
+    })
+  }
+
+  private async setupTeamsRequestMovedSubscription(workspaceID: string) {
+    const [teamRequestMoved$, teamRequestMovedSub] =
+      runTeamRequestMovedSubscription(workspaceID)
+
+    this.subscriptions.push(teamRequestMovedSub)
+
+    teamRequestMoved$.subscribe((result) => {
+      if (E.isLeft(result)) {
+        console.error(result.left)
+        return
+      }
+
+      this.requests.value = this.requests.value.map((request) => {
+        if (request.requestID === result.right.requestMoved.id) {
+          return {
+            ...request,
+            collectionID: result.right.requestMoved.collectionID,
+          }
+        }
+
+        return request
+      })
     })
   }
 }
@@ -989,3 +1056,64 @@ window.TeamsWorkspaceProviderService = TeamsWorkspaceProviderService
 // cache the children of a collection
 // cursors
 // setup subscriptions for the changes
+
+const testProvider = async () => {
+  const provider = new TeamsWorkspaceProviderService()
+
+  window.testProvider = provider
+
+  const workspace = await provider.createWorkspace("Teams Workspace 1")
+
+  if (E.isLeft(workspace)) {
+    return
+  }
+
+  const res = await provider.selectWorkspace(workspace.right)
+
+  if (E.isLeft(res)) {
+    console.log("Workspace Selection Failed")
+    return
+  }
+
+  if (workspace.right.value.type === "invalid") {
+    return
+  }
+
+  const workspaceID = workspace.right.value.data.workspaceID
+
+  const teamCollection = await provider.createRESTRootCollection(
+    workspace.right,
+    {
+      name: "Team Collection 1",
+    }
+  )
+
+  if (E.isLeft(teamCollection)) {
+    return
+  }
+
+  if (!isValidCollectionHandle(teamCollection.right, provider.providerID)) {
+    console.log("Invalid Collection Handle")
+    return
+  }
+
+  const childCollection = await provider.createRESTChildCollection(
+    teamCollection.right,
+    {
+      name: "Team Child Collection 1",
+    }
+  )
+
+  if (E.isLeft(childCollection)) {
+    return
+  }
+
+  if (!isValidCollectionHandle(childCollection.right, provider.providerID)) {
+    console.log("Invalid Collection Handle")
+    return
+  }
+
+  window.currentProvider = provider
+}
+
+window.testProvider = testProvider
