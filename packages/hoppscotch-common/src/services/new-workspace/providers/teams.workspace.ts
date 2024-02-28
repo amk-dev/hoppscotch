@@ -43,6 +43,8 @@ import {
 } from "~/helpers/backend/graphql"
 import { Subscription } from "wonka"
 
+import { generateKeyBetween } from "fractional-indexing"
+
 export class TeamsWorkspaceProviderService
   extends Service
   implements WorkspaceProvider
@@ -67,6 +69,14 @@ export class TeamsWorkspaceProviderService
       order: string
     })[]
   > = ref([])
+
+  private orderedCollections = computed(() => {
+    return sortByOrder(this.collections.value)
+  })
+
+  private orderedRequests = computed(() => {
+    return sortByOrder(this.requests.value)
+  })
 
   private subscriptions: Subscription[] = []
 
@@ -173,6 +183,9 @@ export class TeamsWorkspaceProviderService
     this.setupTeamsCollectionMovedSubscription(
       workspaceHandle.value.data.workspaceID
     )
+    this.setupTeamRequestOrderUpdatedSubscription(
+      workspaceHandle.value.data.workspaceID
+    )
 
     // start fetching root collections
     const res = await fetchRootCollections(
@@ -183,14 +196,23 @@ export class TeamsWorkspaceProviderService
       return res
     }
 
-    res.right.rootCollectionsOfTeam.forEach((collection) => {
-      this.collections.value.push({
-        collectionID: collection.id,
-        providerID: this.providerID,
-        workspaceID: workspaceHandle.value.data.workspaceID,
-        name: collection.title,
-      })
-    })
+    let previousOrder: string | null = null
+
+    this.collections.value = res.right.rootCollectionsOfTeam.map(
+      (collection) => {
+        const order = generateKeyBetween(previousOrder, null)
+
+        previousOrder = order
+
+        return {
+          collectionID: collection.id,
+          providerID: this.providerID,
+          workspaceID: workspaceHandle.value.data.workspaceID,
+          name: collection.title,
+          order,
+        }
+      }
+    )
 
     return E.right(undefined)
   }
@@ -531,19 +553,19 @@ export class TeamsWorkspaceProviderService
     // PR-COMMENT: this feels a little weird, we're returning a computed, i could move this into the returned computed
     // look into this later
     const collectionChildren = computed((): RESTCollectionViewItem[] =>
-      this.collections.value
-        .filter(
+      sortByOrder(
+        this.collections.value.filter(
           (collection) =>
             collection.parentCollectionID ===
             collectionHandle.value.data.collectionID
         )
-        .map((collection) => ({
-          type: "collection",
-          value: {
-            collectionID: collection.collectionID,
-            name: collection.name,
-          },
-        }))
+      ).map((collection) => ({
+        type: "collection",
+        value: {
+          collectionID: collection.collectionID,
+          name: collection.name,
+        },
+      }))
     )
 
     return E.right(
@@ -583,12 +605,14 @@ export class TeamsWorkspaceProviderService
     }
 
     const rootCollections = computed(() =>
-      this.collections.value
-        .filter((collection) => !collection.parentCollectionID)
-        .map((collection) => ({
-          collectionID: collection.collectionID,
-          name: collection.name,
-        }))
+      sortByOrder(
+        this.collections.value.filter(
+          (collection) => !collection.parentCollectionID
+        )
+      ).map((collection) => ({
+        collectionID: collection.collectionID,
+        name: collection.name,
+      }))
     )
 
     return E.right(
@@ -703,14 +727,24 @@ export class TeamsWorkspaceProviderService
       console.log(result)
       console.groupEnd()
 
+      const parentCollectionID = result.right.teamCollectionAdded.parent?.id
+
+      const siblingCollections = this.collections.value.filter(
+        (collection) => collection.parentCollectionID === parentCollectionID
+      )
+      const lastChild = siblingCollections.at(-1)
+      const order = generateKeyBetween(lastChild?.order, null)
+
       const collection: WorkspaceCollection & {
         parentCollectionID?: string
+        order: string
       } = {
         name: result.right.teamCollectionAdded.title,
         collectionID: result.right.teamCollectionAdded.id,
         providerID: this.providerID,
         workspaceID: workspaceID,
         parentCollectionID: result.right.teamCollectionAdded.parent?.id,
+        order,
       }
 
       this.collections.value.push(collection)
@@ -782,11 +816,22 @@ export class TeamsWorkspaceProviderService
         return
       }
 
+      const siblingCollections = this.collections.value.filter(
+        (collection) =>
+          collection.parentCollectionID ===
+          result.right.teamCollectionMoved.parent?.id
+      )
+
+      const lastChild = siblingCollections.at(-1)
+
+      const order = generateKeyBetween(lastChild?.order, null)
+
       this.collections.value = this.collections.value.map((collection) => {
         if (collection.collectionID === result.right.teamCollectionMoved.id) {
           return {
             ...collection,
             parentCollectionID: result.right.teamCollectionMoved.parent?.id,
+            order,
           }
         }
 
@@ -811,12 +856,24 @@ export class TeamsWorkspaceProviderService
       console.log(result)
       console.groupEnd()
 
-      const request: WorkspaceRequest = {
+      const siblingRequests = this.requests.value.filter(
+        (request) =>
+          request.collectionID === result.right.teamRequestAdded.collectionID
+      )
+
+      const lastSibling = siblingRequests.at(-1)
+
+      const order = generateKeyBetween(lastSibling?.order, null)
+
+      const request: WorkspaceRequest & {
+        order: string
+      } = {
         requestID: result.right.teamRequestAdded.id,
         providerID: this.providerID,
         workspaceID: workspaceID,
         collectionID: result.right.teamRequestAdded.collectionID,
         request: JSON.parse(result.right.teamRequestAdded.request),
+        order,
       }
 
       this.requests.value.push(request)
@@ -849,7 +906,10 @@ export class TeamsWorkspaceProviderService
 
       this.requests.value = this.requests.value.map((request) => {
         if (request.requestID === result.right.teamRequestUpdated.id) {
-          return updatedRequest
+          return {
+            ...request,
+            ...updatedRequest,
+          }
         }
 
         return request
@@ -891,16 +951,57 @@ export class TeamsWorkspaceProviderService
         return
       }
 
+      const siblingRequests = this.requests.value.filter(
+        (request) =>
+          request.collectionID === result.right.requestMoved.collectionID
+      )
+
+      const lastSibling = siblingRequests.at(-1)
+
+      const order = generateKeyBetween(lastSibling?.order, null)
+
       this.requests.value = this.requests.value.map((request) => {
         if (request.requestID === result.right.requestMoved.id) {
           return {
             ...request,
             collectionID: result.right.requestMoved.collectionID,
+            order,
           }
         }
 
         return request
       })
+    })
+  }
+
+  private async setupTeamRequestOrderUpdatedSubscription(workspaceID: string) {
+    const [teamRequestOrderUpdated$, teamRequestOrderUpdatedSub] =
+      runTeamRequestOrderUpdatedSubscription(workspaceID)
+
+    this.subscriptions.push(teamRequestOrderUpdatedSub)
+
+    teamRequestOrderUpdated$.subscribe((result) => {
+      if (E.isLeft(result)) {
+        console.error(result.left)
+        return
+      }
+
+      const { request, nextRequest } = result.right.requestOrderUpdated
+
+      const reorderOperation = reorderItemsWithoutChangingParent(
+        request.id,
+        nextRequest?.id ?? null,
+        this.orderedRequests.value,
+        "requestID",
+        "collectionID"
+      )
+
+      if (E.isLeft(reorderOperation)) {
+        console.error(reorderOperation.left)
+        return
+      }
+
+      this.requests.value = reorderOperation.right
     })
   }
 }
@@ -1117,3 +1218,101 @@ const testProvider = async () => {
 }
 
 window.testProvider = testProvider
+
+const reorderItemsWithoutChangingParent = <
+  ParentIDKey extends keyof Reorderable,
+  IDKey extends keyof Reorderable,
+  Reorderable extends { order: string } & {
+    [key in ParentIDKey]: string | null
+  } & {
+    [key in IDKey]: string
+  },
+>(
+  sourceItemID: string,
+  destinationItemID: string | null,
+  items: Reorderable[],
+  idKey: IDKey,
+  parentIDKey: ParentIDKey
+) => {
+  const sourceItem = items.find((item) => item[idKey] === sourceItemID)
+
+  if (!sourceItem) {
+    return E.left("SOURCE_ITEM_NOT_FOUND_WHILE_REORDERING")
+  }
+
+  let destinationItem: Reorderable | undefined
+  let destinationOrder: string | null = null
+
+  if (destinationItemID) {
+    destinationItem = items.find((item) => item[idKey] === destinationItemID)
+
+    if (!destinationItem) {
+      return E.left("DESTINATION_ITEM_NOT_FOUND_WHILE_REORDERING")
+    }
+
+    destinationOrder = destinationItem.order
+  }
+
+  const siblingItems = items.filter(
+    (item) => item[parentIDKey] === sourceItem[parentIDKey]
+  )
+
+  const previousItem = (() => {
+    // if the destination order is null, we're moving the collection to the end of the list
+    if (destinationOrder === null) {
+      return E.right(siblingItems.at(-1))
+    }
+
+    const destinationCollection = siblingItems.find(
+      (collection) => collection[idKey] === destinationItemID
+    )
+
+    if (!destinationCollection) {
+      return E.left("DESTINATION_ITEM_NOT_FOUND")
+    }
+
+    return E.right(destinationCollection)
+  })()
+
+  if (E.isLeft(previousItem)) {
+    return previousItem
+  }
+
+  const newOrder = generateKeyBetween(
+    previousItem.right?.order ?? null,
+    destinationItem?.order ?? null
+  )
+
+  return E.right(
+    items.map((item) =>
+      item[idKey] === sourceItemID
+        ? {
+            ...item,
+            order: newOrder,
+          }
+        : item
+    )
+  )
+}
+
+const sortByOrder = <OrderedItem extends { order: string }>(
+  items: OrderedItem[]
+) => {
+  return items.sort((item1, item2) => {
+    if (item1.order < item2.order) {
+      return -1
+    }
+
+    if (item1.order > item2.order) {
+      return 1
+    }
+
+    return 0
+  })
+}
+
+// TODO
+// where to put the getChildren api call
+// cursor + pagination stuff
+// decor stuff
+// inherited auth + headers stuff
