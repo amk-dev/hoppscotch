@@ -63,6 +63,7 @@ const isInsomniaImporterInProgress = ref(false)
 const isOpenAPIImporterInProgress = ref(false)
 const isRESTImporterInProgress = ref(false)
 const isPersonalCollectionImporterInProgress = ref(false)
+const isAllCollectionImporterInProgress = ref(false)
 const isHarImporterInProgress = ref(false)
 const isGistImporterInProgress = ref(false)
 
@@ -248,15 +249,11 @@ const HoppAllCollectionImporter: ImporterOrExporter = {
     applicableTo: ["team-workspace"],
   },
   component: defineStep("all_collection_import", AllCollectionImport, () => ({
-    loading: isPersonalCollectionImporterInProgress.value,
-    async onImportFromMyCollection(content) {
-      // isPersonalCollectionImporterInProgress.value = true
+    loading: isAllCollectionImporterInProgress.value,
+    async onImportCollection(content) {
+      isAllCollectionImporterInProgress.value = true
 
-      // await handleImportToStore([content])
-
-      console.group("Import from all collections")
-      console.log(content)
-      console.groupEnd()
+      await handleImportToStore([content])
 
       // our analytics consider this as an export event, so keeping compatibility with that
       platform.analytics?.logEvent({
@@ -265,7 +262,7 @@ const HoppAllCollectionImporter: ImporterOrExporter = {
         platform: "rest",
       })
 
-      // isPersonalCollectionImporterInProgress.value = false
+      isAllCollectionImporterInProgress.value = false
     },
   })),
 }

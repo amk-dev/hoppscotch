@@ -50,16 +50,22 @@
 </template>
 
 <script setup lang="ts">
-import { HoppCollection } from "@hoppscotch/data"
+import {
+  GQLHeader,
+  HoppCollection,
+  HoppGQLAuth,
+  HoppGQLRequest,
+  HoppRESTAuth,
+  HoppRESTHeader,
+  HoppRESTRequest,
+  makeCollection,
+} from "@hoppscotch/data"
 import { useService } from "dioc/vue"
 import { computed, ref, watch } from "vue"
 import { useI18n } from "~/composables/i18n"
 import { useReadonlyStream } from "~/composables/stream"
 import { runGQLQuery } from "~/helpers/backend/GQLClient"
-import {
-  RootCollectionsOfTeamDocument,
-  TeamCollection,
-} from "~/helpers/backend/graphql"
+import { RootCollectionsOfTeamDocument } from "~/helpers/backend/graphql"
 import NewTeamCollectionAdapter, {
   TEAMS_BACKEND_PAGE_SIZE,
 } from "~/helpers/teams/TeamCollectionAdapter"
@@ -69,12 +75,15 @@ import * as E from "fp-ts/Either"
 import {
   getCollectionChildCollections,
   getSingleCollection,
+  TeamCollection,
 } from "~/helpers/teams/TeamCollection"
 import {
   getCollectionChildRequests,
   getSingleRequest,
+  TeamRequest,
 } from "~/helpers/teams/TeamRequest"
-import { getTeamCollectionJSON } from "~/helpers/backend/helpers"
+import { HoppInheritedProperty } from "~/helpers/types/HoppInheritedProperties"
+import { useToast } from "~/composables/toast"
 
 const workspaceService = useService(WorkspaceService)
 const teamListAdapter = workspaceService.acquireTeamListAdapter(null)
@@ -105,6 +114,8 @@ const selectableCollections = ref<
     data?: string | null
   }[]
 >([])
+
+const toast = useToast()
 
 watch(
   selectedWorkspaceID,
@@ -205,17 +216,46 @@ const getWorkspaceRootCollections = async (workspaceID: string) => {
   return E.right(totalCollections)
 }
 
-const getTeamCollection = async (collectionID: string) => {
-  console.log("Getting team collection", collectionID)
-  const rootCollection = await getSingleCollection(collectionID)
+const convertToInheritedProperties = (
+  data?: string | null
+): {
+  auth: HoppRESTAuth | HoppGQLAuth
+  headers: Array<HoppRESTHeader | GQLHeader>
+} => {
+  const collectionLevelAuthAndHeaders = data
+    ? (JSON.parse(data) as {
+        auth: HoppRESTAuth | HoppGQLAuth
+        headers: Array<HoppRESTHeader | GQLHeader>
+      })
+    : null
 
-  if (E.isLeft(rootCollection)) {
-    return E.left(rootCollection.left)
+  const headers = collectionLevelAuthAndHeaders?.headers ?? []
+
+  const auth = collectionLevelAuthAndHeaders?.auth ?? {
+    authType: "none",
+    authActive: true,
   }
 
-  console.group("Root collection")
-  console.log(rootCollection.right.collection)
-  console.groupEnd()
+  return {
+    auth,
+    headers,
+  }
+}
+
+const getTeamCollection = async (
+  collectionID: string
+): Promise<E.Either<any, HoppCollection>> => {
+  const rootCollectionRes = await getSingleCollection(collectionID)
+
+  if (E.isLeft(rootCollectionRes)) {
+    return E.left(rootCollectionRes.left)
+  }
+
+  const rootCollection = rootCollectionRes.right.collection
+
+  if (!rootCollection) {
+    return E.left("ROOT_COLLECTION_NOT_FOUND")
+  }
 
   const childRequests = await getCollectionChildRequests(collectionID)
 
@@ -223,26 +263,45 @@ const getTeamCollection = async (collectionID: string) => {
     return E.left(childRequests.left)
   }
 
-  const childCollections = await getCollectionChildCollections(collectionID)
+  const childCollectionsRes = await getCollectionChildCollections(collectionID)
 
-  if (E.isLeft(childCollections)) {
-    return E.left(childCollections.left)
+  if (E.isLeft(childCollectionsRes)) {
+    return E.left(childCollectionsRes.left)
+  }
+
+  if (!childCollectionsRes.right.collection) {
+    return E.left("CHILD_COLLECTIONS_NOT_FOUND")
   }
 
   const childCollectionExpandedPromises =
-    childCollections.right.collection?.children.map(
-      (col): Promise<HoppCollection> => getTeamCollection(col.id)
+    childCollectionsRes.right.collection.children.map((col) =>
+      getTeamCollection(col.id)
     )
 
-  return <HoppCollection>{
-    v: 3,
-    name: rootCollection.right.collection?.title,
+  const childCollectionPromiseRes = await Promise.all(
+    childCollectionExpandedPromises
+  )
+
+  const hasAnyError = childCollectionPromiseRes.some((res) => E.isLeft(res))
+
+  if (hasAnyError) {
+    return E.left("CHILD_COLLECTIONS_NOT_FOUND")
   }
 
-  // getSingleCollection
-  // getSingleRequest
-  // getCollectionChildCollections
-  // getCollectionChildRequests
+  const unwrappedChildCollections = childCollectionPromiseRes.map(
+    (res) => (res as E.Right<HoppCollection>).right
+  )
+
+  const collectionInHoppFormat: HoppCollection = makeCollection({
+    name: rootCollection.title,
+    ...convertToInheritedProperties(rootCollection.data),
+    folders: unwrappedChildCollections,
+    requests: childRequests.right.requestsInCollection.map((req) => {
+      return JSON.parse(req.request) as HoppRESTRequest | HoppGQLRequest
+    }),
+  })
+
+  return E.right(collectionInHoppFormat)
 }
 
 const getCollectionDetailsAndImport = async () => {
@@ -250,21 +309,22 @@ const getCollectionDetailsAndImport = async () => {
     return
   }
 
+  let collectionToImport: HoppCollection
+
   if (selectedWorkspaceID.value === "personal") {
-    getPersonalCollection(parseInt(selectedCollectionID.value))
+    collectionToImport = getRESTCollection(parseInt(selectedCollectionID.value))
   } else {
-    getTeamCollection(selectedCollectionID.value)
+    const res = await getTeamCollection(selectedCollectionID.value)
+
+    if (E.isLeft(res)) {
+      toast.error(t("import.failed"))
+
+      return
+    }
+
+    collectionToImport = res.right
   }
+
+  emit("importCollection", collectionToImport)
 }
-
-const getPersonalCollection = async (collectionID: number) => {
-  const collection = getRESTCollection(collectionID)
-
-  if (collection) {
-    emit("importCollection", collection)
-  }
-}
-
-// TODO: edgecases
-// 1. do not show the current workspace in the import options\
 </script>
