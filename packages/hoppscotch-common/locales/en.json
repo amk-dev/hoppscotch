@@ -4,6 +4,9 @@
     "autoscroll": "Autoscroll",
     "cancel": "Cancel",
     "choose_file": "Choose a file",
+    "choose_workspace": "Choose a workspace",
+    "choose_collection": "Choose a collection",
+    "select_workspace": "Select a workspace",
     "clear": "Clear",
     "clear_all": "Clear all",
     "clear_history": "Clear all History",
@@ -949,7 +952,9 @@
     "subscribed_success": "Successfully subscribed to topic: {topic}",
     "unsubscribed_failed": "Failed to unsubscribe from topic: {topic}",
     "unsubscribed_success": "Successfully unsubscribed from topic: {topic}",
-    "waiting_send_request": "Waiting to send request"
+    "waiting_send_request": "Waiting to send request",
+    "loading_workspaces": "Loading workspaces",
+    "loading_collections_in_workspace": "Loading collections in workspace"
   },
   "support": {
     "changelog": "Read more about latest releases",

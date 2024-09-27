@@ -246,7 +246,7 @@ const HoppAllCollectionImporter: ImporterOrExporter = {
     title: "import.from_all_collections_description",
     icon: IconUser,
     disabled: false,
-    applicableTo: ["team-workspace"],
+    applicableTo: ["personal-workspace", "team-workspace"],
   },
   component: defineStep("all_collection_import", AllCollectionImport, () => ({
     loading: isAllCollectionImporterInProgress.value,

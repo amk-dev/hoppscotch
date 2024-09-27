@@ -1,41 +1,82 @@
 <template>
-  <div class="select-wrapper">
-    <select
-      v-model="selectedWorkspaceID"
-      autocomplete="off"
-      class="select"
-      autofocus
-    >
-      <option :key="undefined" :value="undefined" disabled selected>
-        {{ t("collection.select") }}
-      </option>
-      <option
-        v-for="workspace in workspaces"
-        :key="`collection-${workspace.id}`"
-        :value="workspace.id"
-        class="bg-primary"
-      >
-        {{ workspace.name }}
-      </option>
-    </select>
-    <select
-      v-model="selectedCollectionID"
-      autocomplete="off"
-      class="select"
-      autofocus
-    >
-      <option :key="undefined" :value="undefined" disabled selected>
-        {{ t("collection.select") }}
-      </option>
-      <option
-        v-for="collection in selectableCollections"
-        :key="collection.id"
-        :value="collection.id"
-        class="bg-primary"
-      >
-        {{ collection.title }}
-      </option>
-    </select>
+  <div class="select-wrapper flex flex-col gap-2">
+    <div>
+      <p class="flex items-center">
+        <span
+          class="inline-flex items-center justify-center flex-shrink-0 mr-4 border-4 rounded-full border-primary text-dividerDark"
+        >
+          <icon-lucide-check-circle class="svg-icons" />
+        </span>
+        <span>
+          {{ t(`action.choose_workspace`) }}
+        </span>
+      </p>
+      <div class="pl-10">
+        <div v-if="isLoadingTeams" class="flex gap-1">
+          <HoppSmartSpinner />
+
+          {{ t("state.loading_workspaces") }}
+        </div>
+        <select
+          v-else
+          v-model="selectedWorkspaceID"
+          autocomplete="off"
+          class="select mt-2"
+          autofocus
+        >
+          <option :key="undefined" :value="undefined" disabled selected>
+            {{ t("action.select_workspace") }}
+          </option>
+          <option
+            v-for="workspace in workspaces"
+            :key="`workspace-${workspace.id}`"
+            :value="workspace.id"
+            class="bg-primary"
+          >
+            {{ workspace.name }}
+          </option>
+        </select>
+      </div>
+    </div>
+
+    <div v-if="showSelectCollections">
+      <p class="flex items-center">
+        <span
+          class="inline-flex items-center justify-center flex-shrink-0 mr-4 border-4 rounded-full border-primary text-dividerDark"
+        >
+          <icon-lucide-check-circle class="svg-icons" />
+        </span>
+        <span>
+          {{ t(`action.choose_collection`) }}
+        </span>
+      </p>
+      <div class="pl-10">
+        <div v-if="isGettingWorkspaceRootCollections" class="flex gap-1">
+          <HoppSmartSpinner />
+
+          {{ t("state.loading_collections_in_workspace") }}
+        </div>
+        <select
+          v-else
+          v-model="selectedCollectionID"
+          autocomplete="off"
+          class="select mt-2"
+          autofocus
+        >
+          <option :key="undefined" :value="undefined" disabled selected>
+            {{ t("collection.select") }}
+          </option>
+          <option
+            v-for="collection in selectableCollections"
+            :key="collection.id"
+            :value="collection.id"
+            class="bg-primary"
+          >
+            {{ collection.title }}
+          </option>
+        </select>
+      </div>
+    </div>
   </div>
 
   <div class="my-4">
@@ -66,9 +107,7 @@ import { useI18n } from "~/composables/i18n"
 import { useReadonlyStream } from "~/composables/stream"
 import { runGQLQuery } from "~/helpers/backend/GQLClient"
 import { RootCollectionsOfTeamDocument } from "~/helpers/backend/graphql"
-import NewTeamCollectionAdapter, {
-  TEAMS_BACKEND_PAGE_SIZE,
-} from "~/helpers/teams/TeamCollectionAdapter"
+import { TEAMS_BACKEND_PAGE_SIZE } from "~/helpers/teams/TeamCollectionAdapter"
 import { getRESTCollection, restCollections$ } from "~/newstore/collections"
 import { WorkspaceService } from "~/services/workspace.service"
 import * as E from "fp-ts/Either"
@@ -88,6 +127,7 @@ import { useToast } from "~/composables/toast"
 const workspaceService = useService(WorkspaceService)
 const teamListAdapter = workspaceService.acquireTeamListAdapter(null)
 const myTeams = useReadonlyStream(teamListAdapter.teamList$, null)
+const isLoadingTeams = useReadonlyStream(teamListAdapter.loading$, false)
 
 const t = useI18n()
 
@@ -131,7 +171,6 @@ watch(
       return
     }
 
-    console.group("selectedWorkspaceID changed")
     if (selectedWorkspaceID.value === "personal") {
       return
     }
@@ -146,15 +185,9 @@ watch(
       return
     }
 
-    console.group("Root collections of workspace ", selectedWorkspaceID.value)
-    console.log(res.right)
-    console.groupEnd()
-
     selectableCollections.value = res.right
 
     isGettingWorkspaceRootCollections.value = false
-
-    console.groupEnd()
   },
   {
     immediate: true,
@@ -164,6 +197,10 @@ watch(
 const emit = defineEmits<{
   (e: "importCollection", content: HoppCollection): void
 }>()
+
+const showSelectCollections = computed(() => {
+  return !!selectedWorkspaceID.value
+})
 
 const workspaces = computed(() => {
   const allWorkspaces = [
